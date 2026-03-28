@@ -1,0 +1,116 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 213 94% 68%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 217 91% 60%;
+    --radius: 1rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: "Inter", sans-serif;
+    background-image:
+      radial-gradient(circle at top left, rgba(59, 130, 246, 0.06), transparent 28%),
+      linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.96));
+    min-height: 100vh;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  [data-selcukbolt-shell] {
+    min-height: 100vh;
+    padding: 24px 20px 40px;
+    display: grid;
+    gap: 20px;
+  }
+
+  [data-selcukbolt-toolbar] {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  [data-selcukbolt-grid] {
+    display: grid;
+    gap: 20px;
+  }
+
+  [data-selcukbolt-card],
+  [data-selcukbolt-panel],
+  [data-selcukbolt-viewport] {
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 20px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
+  }
+
+  [data-selcukbolt-card] {
+    overflow: hidden;
+  }
+
+  [data-selcukbolt-viewport] {
+    position: relative;
+    overflow: hidden;
+    min-height: 520px;
+  }
+
+  [data-selcukbolt-panel] {
+    padding: 16px;
+  }
+
+  button,
+  input,
+  select {
+    border-radius: 14px;
+  }
+
+  input,
+  select,
+  textarea {
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    color: #0f172a;
+    padding: 0.8rem 0.95rem;
+  }
+
+  button {
+    border: 1px solid rgba(148, 163, 184, 0.22);
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "maxilla_path": "",
+  "mandible_path": "",
+  "maxilla_filename": "",
+  "mandible_filename": "",
+  "measurement_rows": [],
+  "completed_teeth": {
+    "maxillary": [],
+    "mandibular": []
+  },
+  "missing_teeth": {
+    "maxillary": [],
+    "mandibular": []
+  },
+  "arch_lengths": {
+    "maxillary": null,
+    "mandibular": null
+  },
+  "guided_active": false,
+  "guided_jaw": null,
+  "guided_sequence": [],
+  "guided_index": -1,
+  "guided_step": "",
+  "guided_mesial_point": null,
+  "guided_distal_point": null,
+  "guided_pending_point": null,
+  "arch_mode_active": false,
+  "arch_mode_jaw": null,
+  "arch_points": []
+}
