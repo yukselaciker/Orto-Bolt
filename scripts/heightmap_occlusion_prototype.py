@@ -461,10 +461,14 @@ def build_height_maps(
         )
 
     initial_overlap = lower_z_map - upper_z_map
-    if np.all(np.isnan(initial_overlap)):
+    artefact_pixels = initial_overlap > 2.0
+    lower_z_map[artefact_pixels] = np.nan
+
+    clean_overlap = lower_z_map - upper_z_map
+    if np.all(np.isnan(clean_overlap)):
         z_offset_calibration = 0.0
     else:
-        z_offset_calibration = float(np.nanmax(initial_overlap))
+        z_offset_calibration = float(np.nanmax(clean_overlap))
 
     return HeightMapBundle(
         x_coords=x_coords,
@@ -786,16 +790,23 @@ class HeightMapOcclusionWindow(QMainWindow):
             self.vertical_correction_mm = 0.0
         else:
             resolution_mm = float(self.height_maps.resolution_mm)
-            # NumPy grid:
-            # axis 1 (cols) -> X
-            # axis 0 (rows) -> Y
-            shift_col_x = int(dx_mm / resolution_mm)
-            shift_row_y = int(dy_mm / resolution_mm)
+            # Height-map grid eksenleri (kritik):
+            #   rotate_meshes_for_occlusal_heightmap X ekseninde -90° döndürür:
+            #     eski-Y → yeni-Z (vertikal),  eski-Z → yeni-Y (sagital)
+            #   build_height_maps indexing="xy" ile grid kurar:
+            #     axis 0 (satırlar) → döndürülmüş Y = orijinal Z ekseni
+            #     axis 1 (sütunlar) → X = transversal (değişmedi)
+            #   Sonuç:
+            #     dx_mm (transversal, 3Shape X) → axis-1 (cols)
+            #     dy_mm (sagital, 3Shape Y) → 3Shape Y, rotasyonla grid-row haline gelir
+            #     Dolayısıyla her ikisi de doğru ekse uygulanıyor; np.round ekle.
+            shift_col_transversal = int(np.round(dx_mm / resolution_mm))
+            shift_row_sagittal    = int(np.round(dy_mm / resolution_mm))
 
             shifted_lower_z = fast_shift_2d(
                 self.height_maps.lower_z_map,
-                shift_row_y,
-                shift_col_x,
+                shift_row_sagittal,
+                shift_col_transversal,
             )
             valid_mask = np.isfinite(self.height_maps.upper_z_map) & np.isfinite(shifted_lower_z)
 
@@ -813,8 +824,8 @@ class HeightMapOcclusionWindow(QMainWindow):
         # Saf, mutlak transform: sentrik referans her zaman (0,0,0)
         matrix = np.eye(4, dtype=float)
         matrix[0, 3] = dx_mm
-        matrix[1, 3] = dy_mm
-        matrix[2, 3] = self.vertical_correction_mm
+        matrix[1, 3] = self.vertical_correction_mm
+        matrix[2, 3] = dy_mm
         self.mandible_actor.SetUserMatrix(_numpy_to_vtk_matrix(matrix))
 
         if DEBUG_DISABLE_COLLISION:

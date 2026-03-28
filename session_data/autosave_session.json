@@ -1,10 +1,10 @@
 {
   "session_version": 1,
-  "saved_at": "2026-03-27T20:50:27",
-  "maxilla_path": "",
-  "mandible_path": "",
-  "maxilla_filename": "",
-  "mandible_filename": "",
+  "saved_at": "2026-03-28T09:13:09",
+  "maxilla_path": "/Users/ufuk/Downloads/Upper PreparationScan 2.stl",
+  "mandible_path": "/Users/ufuk/Downloads/Lower AntagonistScan 2.stl",
+  "maxilla_filename": "Upper PreparationScan 2.stl",
+  "mandible_filename": "Lower AntagonistScan 2.stl",
   "measurement_rows": [],
   "completed_teeth": {
     "maxillary": [],
@@ -33,6 +33,11 @@
   "arch_mode_active": false,
   "arch_mode_jaw": null,
   "arch_points": [],
-  "view_mode": "maxillary",
-  "active_navigation_tool": "rotate"
+  "view_mode": "occlusion",
+  "active_navigation_tool": "rotate",
+  "occlusion_offsets_mm": {
+    "x": 0.0,
+    "y": 1.4,
+    "z": 0.0
+  }
 }

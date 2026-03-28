@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Box, Camera, Layers3, Orbit, Pin, RotateCcw, Undo2 } from "lucide-react";
+import { Box, Layers3, Orbit, Pin, Trash2 } from "lucide-react";
 import { Canvas, ThreeEvent, useThree } from "@react-three/fiber";
 import { Bounds, Html, Line, OrbitControls } from "@react-three/drei";
 import { BufferGeometry, DoubleSide, MOUSE, Matrix4, MeshPhysicalMaterial, TOUCH, Vector3 } from "three";
@@ -9,7 +9,7 @@ import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { LandmarkPoint, MeshInfo } from "@/lib/types";
+import type { LandmarkPoint, MeasurementsState, MeshInfo } from "@/lib/types";
 
 type ViewerMode = "maxillary" | "mandibular" | "occlusion";
 type CameraPreset = "occlusal" | "frontal" | "lateral";
@@ -20,13 +20,33 @@ interface StlViewportProps {
   mandibleFile: File | null;
   maxillaInfo?: MeshInfo | null;
   mandibleInfo?: MeshInfo | null;
+  currentJawTeeth: number[];
+  measurementValues: MeasurementsState;
+  activeTooth?: number | null;
+  onActivateTooth: (tooth: number) => void;
+  onClearTooth: (tooth: number) => void;
+  onViewerModeChange: (mode: ViewerMode) => void;
+  onCameraPresetChange: (preset: CameraPreset) => void;
+  focusMode?: boolean;
+  measurementStage: "landmarks" | "arch";
   landmarks: LandmarkPoint[];
   landmarkDraft?: LandmarkPoint | null;
   onAddLandmark: (jaw: "maxillary" | "mandibular", point: [number, number, number]) => void;
   onConfirmLandmark: () => void;
   onUndoLandmark: () => void;
   onClearLandmarks: () => void;
+  archModeJaw: "maxillary" | "mandibular";
+  archPoints: Record<"maxillary" | "mandibular", LandmarkPoint[]>;
+  archDraft?: LandmarkPoint | null;
+  archLengths: Record<"maxillary" | "mandibular", number | null>;
+  onAddArchPoint: (jaw: "maxillary" | "mandibular", point: [number, number, number]) => void;
+  onConfirmArchPoint: () => void;
+  onUndoArchPoint: () => void;
+  onClearArchPoints: () => void;
+  onCompleteArchMeasurement: () => void;
+  onArchJawChange: (jaw: "maxillary" | "mandibular") => void;
   cameraPreset: CameraPreset;
+  jawGap: number;
   occlusionShiftX: number;
   occlusionShiftY: number;
   occlusionShiftZ: number;
@@ -79,13 +99,33 @@ export function StlViewport({
   mandibleFile,
   maxillaInfo,
   mandibleInfo,
+  currentJawTeeth,
+  measurementValues,
+  activeTooth,
+  onActivateTooth,
+  onClearTooth,
+  onViewerModeChange,
+  onCameraPresetChange,
+  focusMode = false,
+  measurementStage,
   landmarks,
   landmarkDraft,
   onAddLandmark,
   onConfirmLandmark,
   onUndoLandmark,
   onClearLandmarks,
+  archModeJaw,
+  archPoints,
+  archDraft,
+  archLengths,
+  onAddArchPoint,
+  onConfirmArchPoint,
+  onUndoArchPoint,
+  onClearArchPoints,
+  onCompleteArchMeasurement,
+  onArchJawChange,
   cameraPreset,
+  jawGap,
   occlusionShiftX,
   occlusionShiftY,
   occlusionShiftZ,
@@ -102,13 +142,14 @@ export function StlViewport({
   const [resetKey, setResetKey] = useState(0);
   const [navigationMode, setNavigationMode] = useState<"rotate" | "pan">("rotate");
   const hasAnyModel = Boolean(maxillaFile || mandibleFile);
-  const landmarkEnabled = mode !== "occlusion";
+  const landmarkEnabled = measurementStage === "landmarks" && mode !== "occlusion";
+  const archEnabled = measurementStage === "arch" && mode !== "occlusion" && mode === archModeJaw;
   const occlusionOffsets = useMemo(() => {
     return {
       maxillary: [0, 0, 0] as [number, number, number],
-      mandibular: [occlusionShiftX, occlusionShiftY, occlusionShiftZ] as [number, number, number],
+      mandibular: [occlusionShiftX, occlusionShiftZ - jawGap, occlusionShiftY] as [number, number, number],
     };
-  }, [occlusionShiftX, occlusionShiftY, occlusionShiftZ]);
+  }, [jawGap, occlusionShiftX, occlusionShiftY, occlusionShiftZ]);
   const renderedLandmarks = useMemo(
     () =>
       landmarks.map((landmark) => ({
@@ -130,9 +171,22 @@ export function StlViewport({
       })),
     [landmarks, mandibleInfo, maxillaInfo, mode, occlusionOffsets],
   );
+  const visibleLandmarks = useMemo(
+    () => renderedLandmarks.filter((landmark) => mode === "occlusion" || landmark.jaw === mode),
+    [mode, renderedLandmarks],
+  );
+  const visibleLandmarkDraft = useMemo(() => {
+    if (!landmarkDraft) {
+      return null;
+    }
+    if (mode !== "occlusion" && landmarkDraft.jaw !== mode) {
+      return null;
+    }
+    return landmarkDraft;
+  }, [landmarkDraft, mode]);
   const measurementPairs = useMemo(() => {
     const grouped = new Map<string, LandmarkPoint[]>();
-    for (const landmark of renderedLandmarks) {
+    for (const landmark of visibleLandmarks) {
       const toothKey = landmark.label.split(" ")[0];
       const bucket = grouped.get(toothKey) ?? [];
       bucket.push(landmark);
@@ -141,7 +195,33 @@ export function StlViewport({
     return Array.from(grouped.entries())
       .map(([tooth, points]) => ({ tooth, points }))
       .filter((item) => item.points.length >= 2);
-  }, [renderedLandmarks]);
+  }, [visibleLandmarks]);
+  const renderedArchPoints = useMemo(
+    () =>
+      archPoints[mode === "mandibular" ? "mandibular" : "maxillary"]?.map((point) => ({
+        ...point,
+        position:
+          point.coordinateSpace === "mesh"
+            ? transformMeshPointToWorld(
+                point.position,
+                point.jaw === "maxillary" ? maxillaInfo : mandibleInfo,
+                point.jaw === "maxillary"
+                  ? mode === "occlusion"
+                    ? occlusionOffsets.maxillary
+                    : [0, 0, 0]
+                  : mode === "occlusion"
+                    ? occlusionOffsets.mandibular
+                    : [0, 0, 0],
+              )
+            : point.position,
+      })) ?? [],
+    [archPoints, mandibleInfo, maxillaInfo, mode, occlusionOffsets],
+  );
+  const activeArchLength = archLengths[archModeJaw];
+  const stageInstruction =
+    measurementStage === "landmarks"
+      ? `Dis ${activeTooth ?? "-"} icin ${landmarkPhase === "mesial" ? "mesial" : "distal"} noktayi secin ve onaylayin.`
+      : `${archModeJaw === "maxillary" ? "Maksilla" : "Mandibula"} ark boyunca noktalar yerlestirin. En az 2 nokta ile ark boyunu kaydedin.`;
   const mouseButtons =
     navigationMode === "pan"
       ? {
@@ -155,29 +235,20 @@ export function StlViewport({
           RIGHT: MOUSE.PAN,
         };
 
-  return (
-    <Card className="overflow-hidden" data-selcukbolt-card>
-      <CardHeader className="border-b border-slate-100 bg-white/80 pb-4 backdrop-blur">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Orbit className="h-5 w-5 text-blue-600" />
-              3D STL Goruntuleyici
-            </CardTitle>
-            <CardDescription>Maksilla, mandibula veya kapanis gorunumu icin modeli tarayicida inceleyin.</CardDescription>
-          </div>
-          <div className="rounded-full bg-slate-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em] text-slate-600">
-            {mode === "occlusion" ? "Kapanis" : mode === "maxillary" ? "Maksilla" : "Mandibula"}
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        <div className="relative h-[520px] bg-[#f7fafc]" data-selcukbolt-viewport>
+  const viewportBody = (
+    <div
+      className={`relative bg-[#edf1f4] ${
+        focusMode
+          ? "h-full min-h-0 overflow-hidden rounded-[28px] border border-white/60 shadow-[0_30px_80px_rgba(15,23,42,0.12)]"
+          : "h-[520px]"
+      }`}
+      data-selcukbolt-viewport
+    >
           {hasAnyModel ? (
             <Canvas shadows camera={{ position: [0, 0, 120], fov: 30 }} dpr={[1, 1.75]}>
-              <color attach="background" args={["#f8fafc"]} />
+              <color attach="background" args={["#edf1f4"]} />
               <ambientLight intensity={0.24} />
-              <hemisphereLight args={["#fff7ed", "#cbd5e1", 0.56]} />
+              <hemisphereLight args={["#f3f4f6", "#cbd5db", 0.56]} />
               <directionalLight
                 position={[42, 54, 82]}
                 intensity={1.45}
@@ -186,9 +257,9 @@ export function StlViewport({
                 shadow-mapSize-height={2048}
                 shadow-bias={-0.00008}
               />
-              <directionalLight position={[-36, 24, 54]} intensity={0.7} color="#dbeafe" />
-              <directionalLight position={[0, -36, 32]} intensity={0.46} color="#e2e8f0" />
-              <directionalLight position={[0, 22, -70]} intensity={0.52} color="#f8fafc" />
+              <directionalLight position={[-36, 24, 54]} intensity={0.7} color="#dde4ea" />
+              <directionalLight position={[0, -36, 32]} intensity={0.46} color="#d7dee5" />
+              <directionalLight position={[0, 22, -70]} intensity={0.52} color="#f1f4f6" />
               <Suspense fallback={null}>
                 <Bounds fit clip observe margin={1.08}>
                   {mode !== "mandibular" && maxillaFile ? (
@@ -197,8 +268,8 @@ export function StlViewport({
                       material={maxillaMaterial}
                       jaw="maxillary"
                       translation={mode === "occlusion" ? occlusionOffsets.maxillary : [0, 0, 0]}
-                      landmarkEnabled={landmarkEnabled}
-                      onAddLandmark={onAddLandmark}
+                      pointPickingEnabled={landmarkEnabled || archEnabled}
+                      onAddPoint={measurementStage === "landmarks" ? onAddLandmark : onAddArchPoint}
                     />
                   ) : null}
                   {mode !== "maxillary" && mandibleFile ? (
@@ -207,11 +278,11 @@ export function StlViewport({
                       material={mandibleMaterial}
                       jaw="mandibular"
                       translation={mode === "occlusion" ? occlusionOffsets.mandibular : [0, 0, 0]}
-                      landmarkEnabled={landmarkEnabled}
-                      onAddLandmark={onAddLandmark}
+                      pointPickingEnabled={landmarkEnabled || archEnabled}
+                      onAddPoint={measurementStage === "landmarks" ? onAddLandmark : onAddArchPoint}
                     />
                   ) : null}
-                  {landmarkEnabled ? renderedLandmarks.map((landmark) => (
+                  {landmarkEnabled ? visibleLandmarks.map((landmark) => (
                     <group key={landmark.id} position={landmark.position}>
                       <mesh>
                         <sphereGeometry args={[0.22, 18, 18]} />
@@ -228,20 +299,20 @@ export function StlViewport({
                       </Html>
                     </group>
                   )) : null}
-                  {landmarkEnabled && landmarkDraft ? (
-                    <group position={landmarkDraft.position}>
+                  {landmarkEnabled && visibleLandmarkDraft ? (
+                    <group position={visibleLandmarkDraft.position}>
                       <mesh>
                         <sphereGeometry args={[0.28, 20, 20]} />
                         <meshStandardMaterial
-                          color={landmarkDraft.jaw === "maxillary" ? "#60a5fa" : "#4ade80"}
-                          emissive={landmarkDraft.jaw === "maxillary" ? "#1d4ed8" : "#15803d"}
+                          color={visibleLandmarkDraft.jaw === "maxillary" ? "#60a5fa" : "#4ade80"}
+                          emissive={visibleLandmarkDraft.jaw === "maxillary" ? "#1d4ed8" : "#15803d"}
                           emissiveIntensity={0.16}
                           roughness={0.28}
                         />
                       </mesh>
                       <Html distanceFactor={12}>
                         <div className="rounded-md border border-blue-200 bg-white/95 px-1.5 py-0.5 text-[8px] font-semibold text-blue-700 shadow-sm">
-                          {landmarkDraft.label}
+                          {visibleLandmarkDraft.label}
                         </div>
                       </Html>
                     </group>
@@ -249,6 +320,35 @@ export function StlViewport({
                   {landmarkEnabled ? measurementPairs.map(({ tooth, points }) => (
                     <Line key={`line-${tooth}`} points={[points[0].position, points[1].position]} color="#f97316" lineWidth={2} />
                   )) : null}
+                  {archEnabled ? renderedArchPoints.map((point) => (
+                    <group key={point.id} position={point.position}>
+                      <mesh>
+                        <sphereGeometry args={[0.24, 18, 18]} />
+                        <meshStandardMaterial color="#0f766e" roughness={0.3} metalness={0.04} />
+                      </mesh>
+                      <Html distanceFactor={12}>
+                        <div className="rounded-md bg-emerald-900/85 px-1.5 py-0.5 text-[8px] font-semibold text-white shadow-sm">
+                          {point.label}
+                        </div>
+                      </Html>
+                    </group>
+                  )) : null}
+                  {archEnabled && archDraft ? (
+                    <group position={archDraft.position}>
+                      <mesh>
+                        <sphereGeometry args={[0.28, 20, 20]} />
+                        <meshStandardMaterial color="#2dd4bf" emissive="#115e59" emissiveIntensity={0.2} roughness={0.26} />
+                      </mesh>
+                      <Html distanceFactor={12}>
+                        <div className="rounded-md border border-emerald-200 bg-white/95 px-1.5 py-0.5 text-[8px] font-semibold text-emerald-700 shadow-sm">
+                          {archDraft.label}
+                        </div>
+                      </Html>
+                    </group>
+                  ) : null}
+                  {archEnabled && renderedArchPoints.length >= 2 ? (
+                    <Line points={renderedArchPoints.map((point) => point.position)} color="#14b8a6" lineWidth={2} />
+                  ) : null}
                 </Bounds>
               </Suspense>
               <CameraDamping preset={cameraPreset} resetKey={resetKey} />
@@ -283,93 +383,143 @@ export function StlViewport({
             </div>
           )}
 
-          <div className="pointer-events-none absolute left-4 top-4 max-w-[220px] rounded-2xl border border-white/70 bg-white/85 px-4 py-3 shadow-sm backdrop-blur">
+          <div className={`${focusMode ? "pointer-events-auto" : "pointer-events-none"} absolute left-4 top-4 max-w-[280px] rounded-2xl border border-white/70 bg-white/60 px-4 py-3 shadow-sm backdrop-blur-xl`}>
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">
               <Layers3 className="h-3.5 w-3.5 text-blue-600" />
-              Aktif gorunum
+              {measurementStage === "landmarks" ? "Dis Olcumu" : "Ark Boyu"}
             </div>
             <p className="mt-2 text-sm font-semibold text-slate-900">
               {mode === "occlusion" ? "Maksilla + Mandibula" : mode === "maxillary" ? "Maksilla" : "Mandibula"}
             </p>
+            <div className="mt-3 space-y-2 text-xs leading-5 text-slate-600">
+              {measurementStage === "landmarks" ? (
+                <>
+                  <p>
+                    Aktif dis: <span className="font-semibold text-slate-900">{activeTooth ?? "-"}</span>
+                  </p>
+                  <p>
+                    Aktif adim: <span className="font-semibold text-slate-900">{landmarkPhase === "mesial" ? "Mesial" : "Distal"}</span>
+                  </p>
+                  <p>
+                    Tamamlanan nokta: <span className="font-semibold text-slate-900">{visibleLandmarks.length}</span>
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p>
+                    Aktif ark: <span className="font-semibold text-slate-900">{archModeJaw === "maxillary" ? "Maksilla" : "Mandibula"}</span>
+                  </p>
+                  <p>
+                    Nokta sayisi: <span className="font-semibold text-slate-900">{renderedArchPoints.length}</span>
+                  </p>
+                  <p>
+                    Kayitli boy:{" "}
+                    <span className="font-semibold text-slate-900">
+                      {activeArchLength !== null ? `${activeArchLength.toFixed(2)} mm` : "Henuz yok"}
+                    </span>
+                  </p>
+                </>
+              )}
+            </div>
           </div>
 
           {landmarkEnabled ? (
-          <div className="absolute right-4 top-4 flex w-[248px] max-w-[calc(100%-2rem)] flex-col gap-2 rounded-2xl border border-white/70 bg-white/90 p-3 shadow-sm backdrop-blur">
+          <div className="absolute right-4 top-4 flex w-[300px] max-w-[calc(100%-2rem)] flex-col gap-2 rounded-2xl border border-white/70 bg-white/60 p-3 shadow-sm backdrop-blur-xl">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">
               <Pin className="h-3.5 w-3.5 text-blue-600" />
-              Landmark
+              Canli Dis Boyutlari
             </div>
-            <p className="text-sm font-semibold text-slate-900">{renderedLandmarks.length} nokta</p>
+            <p className="text-sm font-semibold text-slate-900">{mode === "maxillary" ? "Maksilla" : "Mandibula"}</p>
             <p className="text-xs leading-5 text-slate-500">
-              Aktif adim: {landmarkPhase === "mesial" ? "Mesial" : "Distal"}
-              <br />
-              Tik ile noktayi hazirlayin, sonra onaylayin.
+              Aktif adim: {landmarkPhase === "mesial" ? "Mesial" : "Distal"}.
+              Olcumu sifirlamak icin ilgili dis satirindaki sil butonunu kullanin.
             </p>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="default"
-                onClick={onConfirmLandmark}
-                disabled={!landmarkDraft}
-                className="min-w-0 flex-1"
-              >
-                Onayla
-              </Button>
-              <Button size="sm" variant="outline" onClick={onUndoLandmark} className="min-w-0 flex-1">
-                <Undo2 className="mr-1 h-3.5 w-3.5" />
-                Geri Al
-              </Button>
-              <Button size="sm" variant="outline" onClick={onClearLandmarks} className="w-full">
-                Temizle
-              </Button>
+            <div className="mt-1 rounded-xl bg-white/55 p-2">
+              <div className="max-h-[220px] space-y-1 overflow-y-auto pr-1">
+                {currentJawTeeth.map((tooth) => (
+                  <div key={tooth} className={`flex items-center gap-2 rounded-xl px-2 py-1.5 ${activeTooth === tooth ? "bg-blue-50/80" : "bg-white/70"}`}>
+                    <button type="button" className="min-w-0 flex-1 text-left text-xs font-medium text-slate-700" onClick={() => onActivateTooth(tooth)}>
+                      <span className="mr-2 font-semibold text-slate-900">{tooth}</span>
+                      <span>{measurementValues[tooth] || "--"}</span>
+                    </button>
+                    {measurementValues[tooth] ? (
+                      <button type="button" className="rounded-lg p-1 text-slate-500 transition hover:bg-rose-50 hover:text-rose-600" onClick={() => onClearTooth(tooth)} aria-label={`${tooth} olcumunu temizle`}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
           ) : null}
 
-          <div className="absolute bottom-4 left-4 rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm backdrop-blur">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">
-              <Camera className="h-3.5 w-3.5 text-blue-600" />
-              Kamera
+          {archEnabled ? (
+            <div className="absolute right-4 top-4 flex w-[300px] max-w-[calc(100%-2rem)] flex-col gap-2 rounded-2xl border border-white/70 bg-white/60 p-3 shadow-sm backdrop-blur-xl">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.26em] text-slate-500">
+                <Pin className="h-3.5 w-3.5 text-emerald-600" />
+                Ark ve Dis Ozetleri
+              </div>
+              <p className="text-sm font-semibold text-slate-900">
+                {archModeJaw === "maxillary" ? "Maksilla" : "Mandibula"} ark olcumu
+              </p>
+              <p className="text-xs leading-5 text-slate-500">
+                Ark boyunca noktalar yerlestirin. Kaydetme ve duzenleme aksiyonlari ust navbar uzerinden devam eder.
+              </p>
+              <div className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+                <div className="flex items-center justify-between">
+                  <span>Nokta Sayisi</span>
+                  <span className="font-semibold text-slate-900">{renderedArchPoints.length}</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between">
+                  <span>Kayitli Ark Boyu</span>
+                  <span className="font-semibold text-slate-900">
+                    {activeArchLength !== null ? `${activeArchLength.toFixed(2)} mm` : "Henuz yok"}
+                  </span>
+                </div>
+              </div>
+              <div className="mt-1 rounded-xl bg-white/55 p-2">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Olculen Disler</p>
+                <div className="max-h-[180px] space-y-1 overflow-y-auto pr-1">
+                  {currentJawTeeth.map((tooth) => (
+                    <div key={tooth} className="flex items-center gap-2 rounded-xl bg-white/70 px-2 py-1.5 text-xs font-medium text-slate-700">
+                      <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onActivateTooth(tooth)}>
+                        <span className="mr-2 font-semibold text-slate-900">{tooth}</span>
+                        <span>{measurementValues[tooth] || "--"}</span>
+                      </button>
+                      {measurementValues[tooth] ? (
+                        <button type="button" className="rounded-lg p-1 text-slate-500 transition hover:bg-rose-50 hover:text-rose-600" onClick={() => onClearTooth(tooth)} aria-label={`${tooth} olcumunu temizle`}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-            <p className="mt-2 text-sm font-semibold text-slate-900">
-              {cameraPreset === "occlusal" ? "Okluzal" : cameraPreset === "frontal" ? "Frontal" : "Lateral"}
-            </p>
-            <div className="mt-2 text-[11px] leading-5 text-slate-500">
-              Sol tik surukle: {navigationMode === "pan" ? "Tasi" : "Dondur"}
-              <br />
-              Sag tik surukle: Tasi
-              <br />
-              Tekerlek: Zoom
+          ) : null}
+
+          {focusMode ? (
+            <div className="absolute bottom-4 left-1/2 w-[min(640px,calc(100%-2rem))] -translate-x-1/2 rounded-2xl border border-white/70 bg-white/55 px-4 py-3 shadow-sm backdrop-blur-xl">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-500">Akis Bilgisi</p>
+              <p className="mt-1 text-sm font-medium text-slate-800">{stageInstruction}</p>
+              <p className="mt-2 text-xs leading-5 text-slate-500">
+                Sol tik ile nokta taslagi olusturun. Onay, geri al, temizle ve kamera secimleri ust navbar uzerinden yonetilir.
+              </p>
             </div>
-            <div className="mt-3 flex gap-2">
-              <Button
-                size="sm"
-                variant={navigationMode === "rotate" ? "default" : "outline"}
-                className="flex-1"
-                onClick={() => setNavigationMode("rotate")}
-              >
-                Dondur
-              </Button>
-              <Button
-                size="sm"
-                variant={navigationMode === "pan" ? "default" : "outline"}
-                className="flex-1"
-                onClick={() => setNavigationMode("pan")}
-              >
-                Tasi
-              </Button>
-            </div>
-            <Button size="sm" variant="outline" className="mt-3 w-full" onClick={() => setResetKey((current) => current + 1)}>
-              <RotateCcw className="mr-2 h-3.5 w-3.5" />
-              Gorunumu Sifirla
-            </Button>
-          </div>
+          ) : null}
 
           {mode === "occlusion" ? (
             <div className="absolute right-4 top-1/2 flex w-[240px] -translate-y-1/2 flex-col gap-3 rounded-2xl border border-white/70 bg-white/92 px-4 py-4 shadow-sm backdrop-blur">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-slate-500">Mandibula Konumu</p>
                 <p className="mt-1 text-sm font-semibold text-slate-900">X / Y / Z eksenlerinde manuel konumlandir</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+                <div className="flex items-center justify-between">
+                  <span>Gorunumsel Cene Araligi</span>
+                  <span className="font-semibold text-slate-900">{jawGap.toFixed(1)} mm</span>
+                </div>
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-[11px] font-medium text-slate-600">
@@ -453,8 +603,30 @@ export function StlViewport({
               </p>
             </div>
           ) : null}
+    </div>
+  );
+
+  if (focusMode) {
+    return viewportBody;
+  }
+
+  return (
+    <Card className="overflow-hidden" data-selcukbolt-card>
+      <CardHeader className="border-b border-slate-100 bg-white/80 pb-4 backdrop-blur">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Orbit className="h-5 w-5 text-blue-600" />
+              3D STL Goruntuleyici
+            </CardTitle>
+            <CardDescription>Maksilla, mandibula veya kapanis gorunumu icin modeli tarayicida inceleyin.</CardDescription>
+          </div>
+          <div className="rounded-full bg-slate-100 px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em] text-slate-600">
+            {mode === "occlusion" ? "Kapanis" : mode === "maxillary" ? "Maksilla" : "Mandibula"}
+          </div>
         </div>
-      </CardContent>
+      </CardHeader>
+      <CardContent className="p-0">{viewportBody}</CardContent>
     </Card>
   );
 }
@@ -464,15 +636,15 @@ function SingleStlMesh({
   material,
   jaw,
   translation,
-  landmarkEnabled,
-  onAddLandmark,
+  pointPickingEnabled,
+  onAddPoint,
 }: {
   file: File;
   material: MeshPhysicalMaterial;
   jaw: "maxillary" | "mandibular";
   translation: [number, number, number];
-  landmarkEnabled: boolean;
-  onAddLandmark: (jaw: "maxillary" | "mandibular", point: [number, number, number]) => void;
+  pointPickingEnabled: boolean;
+  onAddPoint: (jaw: "maxillary" | "mandibular", point: [number, number, number]) => void;
 }) {
   const [geometry, setGeometry] = useState<BufferGeometry | null>(null);
   const dragStateRef = useRef<{ startX: number; startY: number; moved: boolean } | null>(null);
@@ -528,7 +700,7 @@ function SingleStlMesh({
   };
 
   const handlePointerUp = (event: ThreeEvent<PointerEvent>) => {
-    if (!landmarkEnabled) {
+    if (!pointPickingEnabled) {
       dragStateRef.current = null;
       return;
     }
@@ -538,7 +710,7 @@ function SingleStlMesh({
       return;
     }
     event.stopPropagation();
-    onAddLandmark(jaw, [event.point.x, event.point.y, event.point.z]);
+    onAddPoint(jaw, [event.point.x, event.point.y, event.point.z]);
   };
 
   if (!geometry) {

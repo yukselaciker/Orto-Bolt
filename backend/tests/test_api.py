@@ -3,8 +3,10 @@ from __future__ import annotations
 import unittest
 
 from fastapi.testclient import TestClient
+import numpy as np
 
 from backend.app.main import app
+from backend.app.services import _solve_height_map_occlusion
 from core.bolton_logic import analyze_anterior, analyze_overall
 from backend.app.storage import DB_PATH
 
@@ -56,6 +58,11 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(payload["difference"], expected.difference)
         self.assertEqual(payload["discrepancy_mm"], expected.discrepancy_mm)
         self.assertEqual(payload["discrepancy_arch"], expected.discrepancy_arch)
+
+    def test_root_redirects_to_web_ui(self) -> None:
+        response = self.client.get("/", follow_redirects=False)
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(response.headers["location"], "http://127.0.0.1:3000")
 
     def test_combined_endpoint_matches_core_logic(self) -> None:
         response = self.client.post(
@@ -133,6 +140,36 @@ class AnalysisApiTests(unittest.TestCase):
         deleted = self.client.delete(f"/api/v1/records/{record_payload['id']}")
         self.assertEqual(deleted.status_code, 200)
         self.assertTrue(deleted.json()["deleted"])
+
+    def test_height_map_shift_rounds_transversal_to_nearest_grid(self) -> None:
+        upper = np.array([[np.nan, 0.0, np.nan]], dtype=float)
+        lower = np.array([[1.0, np.nan, np.nan]], dtype=float)
+
+        z_correction, max_overlap = _solve_height_map_occlusion(
+            upper_z_map=upper,
+            lower_z_map=lower,
+            resolution_mm=1.0,
+            delta_x_mm=0.6,
+            delta_y_mm=0.0,
+        )
+
+        self.assertEqual(max_overlap, 1.0)
+        self.assertEqual(z_correction, -1.0)
+
+    def test_height_map_shift_rounds_sagittal_to_nearest_grid(self) -> None:
+        upper = np.array([[np.nan], [0.0], [np.nan]], dtype=float)
+        lower = np.array([[1.0], [np.nan], [np.nan]], dtype=float)
+
+        z_correction, max_overlap = _solve_height_map_occlusion(
+            upper_z_map=upper,
+            lower_z_map=lower,
+            resolution_mm=1.0,
+            delta_x_mm=0.0,
+            delta_y_mm=0.6,
+        )
+
+        self.assertEqual(max_overlap, 1.0)
+        self.assertEqual(z_correction, -1.0)
 
 
 if __name__ == "__main__":

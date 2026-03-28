@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import sqlite3
 from tempfile import NamedTemporaryFile
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from starlette.background import BackgroundTask
 
 from core.stl_loader import STLLoadError
@@ -58,6 +59,7 @@ app = FastAPI(
     summary="SelcukBolt klinik Bolton analiz mantigini web istemcilere acan API.",
 )
 init_storage()
+WEB_APP_URL = os.environ.get("SELCUKBOLT_WEB_URL", "http://127.0.0.1:3000").rstrip("/")
 
 app.add_middleware(
     CORSMiddleware,
@@ -69,6 +71,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/", include_in_schema=False)
+def root_redirect() -> RedirectResponse:
+    return RedirectResponse(url=WEB_APP_URL or "http://127.0.0.1:3000", status_code=307)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["system"])

@@ -40,31 +40,42 @@ export function SessionToolbar({
   }, []);
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/80 p-1.5" data-selcukbolt-toolbar>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" onClick={onLoadSession} className="h-9 min-w-[118px] justify-start px-3">
-          <FolderOpen className="mr-2 h-4 w-4" />
-          Oturum Yukle
+    <div className="flex items-center gap-1.5 rounded-2xl border border-white/70 bg-white/70 p-1.5 shadow-sm backdrop-blur-xl" data-selcukbolt-toolbar>
+      <div className="flex items-center gap-1.5">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onLoadSession}
+          className="h-10 w-10 rounded-xl p-0"
+          title="Oturum yukle"
+        >
+          <FolderOpen className="h-4 w-4" />
+          <span className="sr-only">Oturum Yukle</span>
         </Button>
-        <Button variant="outline" size="sm" onClick={onSaveSession} className="h-9 min-w-[118px] justify-start px-3">
-          <Save className="mr-2 h-4 w-4" />
-          Oturum Kaydet
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onSaveSession}
+          className="h-10 w-10 rounded-xl p-0"
+          title="Oturum kaydet"
+        >
+          <Save className="h-4 w-4" />
+          <span className="sr-only">Oturum Kaydet</span>
         </Button>
       </div>
 
-      <div className="relative ml-auto" ref={exportRef}>
+      <div className="relative" ref={exportRef}>
         <Button
           variant="secondary"
           size="sm"
           disabled={exportDisabled}
           onClick={() => setExportOpen((current) => !current)}
-          className="h-9 min-w-[122px] justify-between px-3"
+          className="h-10 w-10 rounded-xl p-0"
+          title="Disa aktar"
         >
-          <span className="flex items-center">
-            <Download className="mr-2 h-4 w-4" />
-            Disa Aktar
-          </span>
-          <ChevronDown className="ml-2 h-4 w-4 opacity-70" />
+          <Download className="h-4 w-4" />
+          <ChevronDown className="absolute bottom-1.5 right-1.5 h-3 w-3 opacity-70" />
+          <span className="sr-only">Disa Aktar</span>
         </Button>
 
         {exportOpen ? (

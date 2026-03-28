@@ -330,10 +330,51 @@ class OcclusionPrototypeWindow(QMainWindow):
         )
         return Path(selected) if selected else None
 
+    @staticmethod
+    def _separate_jaws(
+        max_mesh: pv.PolyData,
+        mand_mesh: pv.PolyData,
+        gap_mm: float = 1.0,
+    ) -> tuple[pv.PolyData, pv.PolyData]:
+        """
+        Tarayıcıdan bağımsız dikey eksen tespiti ile çene ayrıştırması.
+        Y ve Z bounding-box genişliğini karşılaştırarak dikey ekseni seçer:
+          - iTero / Medit   → Z ekseni (bounds[4]/[5])
+          - 3Shape / diğerleri → Y ekseni (bounds[2]/[3])
+        """
+        max_y_span = float(max_mesh.bounds[3]) - float(max_mesh.bounds[2])
+        max_z_span = float(max_mesh.bounds[5]) - float(max_mesh.bounds[4])
+        use_z = max_z_span > max_y_span
+
+        if use_z:
+            max_low   = float(max_mesh.bounds[4])
+            mand_high = float(mand_mesh.bounds[5])
+            overlap   = mand_high - max_low
+            if overlap > -gap_mm:
+                moved = mand_mesh.copy(deep=True)
+                moved.translate([0.0, 0.0, -(overlap + gap_mm)], inplace=True)
+                return max_mesh, moved
+        else:
+            max_low   = float(max_mesh.bounds[2])
+            mand_high = float(mand_mesh.bounds[3])
+            overlap   = mand_high - max_low
+            if overlap > -gap_mm:
+                moved = mand_mesh.copy(deep=True)
+                moved.translate([0.0, -(overlap + gap_mm), 0.0], inplace=True)
+                return max_mesh, moved
+
+        return max_mesh, mand_mesh
+
     def _render_scene(self) -> None:
         """PyVista sahnesini oluşturur ve mesh'leri orijinal koordinatlarda gösterir."""
         if self.plotter is None or self.maxilla_mesh is None or self.mandible_mesh is None:
             return
+
+        # Çakışma önleme: görsel render için kopyalar üzerinde ayrıştırma uygula.
+        # Orijinal world-space mesh'ler (self.maxilla_mesh / self.mandible_mesh) değişmez.
+        maxilla_display, mandible_display = self._separate_jaws(
+            self.maxilla_mesh, self.mandible_mesh
+        )
 
         self.plotter.clear()
         self.plotter.set_background("#EEF2F4")
@@ -341,7 +382,7 @@ class OcclusionPrototypeWindow(QMainWindow):
 
         # Yumuşak ve klinik görünümlü pastel renkler.
         self.maxilla_actor = self.plotter.add_mesh(
-            self.maxilla_mesh,
+            maxilla_display,
             color="#F4E7D5",
             smooth_shading=True,
             ambient=0.35,
@@ -351,7 +392,7 @@ class OcclusionPrototypeWindow(QMainWindow):
             name="maxilla",
         )
         self.mandible_actor = self.plotter.add_mesh(
-            self.mandible_mesh,
+            mandible_display,
             color="#EDE1CE",
             smooth_shading=True,
             ambient=0.35,

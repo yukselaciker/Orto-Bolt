@@ -255,10 +255,14 @@ def _build_height_maps(
         )
 
     initial_overlap = lower_z_map - upper_z_map
-    if np.all(np.isnan(initial_overlap)):
+    artefact_pixels = initial_overlap > 2.0
+    lower_z_map[artefact_pixels] = np.nan
+
+    clean_overlap = lower_z_map - upper_z_map
+    if np.all(np.isnan(clean_overlap)):
         z_offset_calibration = 0.0
     else:
-        z_offset_calibration = float(np.nanmax(initial_overlap))
+        z_offset_calibration = float(np.nanmax(clean_overlap))
 
     return {
         "x_coords": x_coords,
@@ -298,10 +302,14 @@ def _solve_height_map_occlusion(
         - Penetrasyon varsa alt çene yalnızca aşağı iner.
         - Boşluk varsa alt çene yukarı kaldırılmaz; Z tekrar 0 olur.
     """
-    # axis 1 (cols) -> X, axis 0 (rows) -> Y
-    shift_col_x = int(delta_x_mm / resolution_mm)
-    shift_row_y = int(delta_y_mm / resolution_mm)
-    shifted_lower = fast_shift_2d(lower_z_map, shift_row_y, shift_col_x)
+    # Height-map grid eksenleri:
+    #   meshgrid(indexing="xy") nedeniyle axis 1 (cols) -> X/transversal,
+    #   axis 0 (rows) -> Y/sagittal.
+    # Davranis korunur; yalnizca int() kirpmasi yerine np.round ile
+    # daha dogru hucre secimi yapilir.
+    shift_col_transversal = int(np.round(delta_x_mm / resolution_mm))
+    shift_row_sagittal = int(np.round(delta_y_mm / resolution_mm))
+    shifted_lower = fast_shift_2d(lower_z_map, shift_row_sagittal, shift_col_transversal)
     valid_mask = np.isfinite(upper_z_map) & np.isfinite(shifted_lower)
     if not np.any(valid_mask):
         return 0.0, 0.0

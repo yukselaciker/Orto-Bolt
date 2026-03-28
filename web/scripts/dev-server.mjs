@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 
 const cwd = process.cwd();
-const devDistDir = ".next-dev";
+const devDistDir = ".next";
 
 for (const dirName of [devDistDir]) {
   const dirPath = resolve(cwd, dirName);
@@ -20,7 +20,6 @@ const child = spawn(
     stdio: "inherit",
     env: {
       ...process.env,
-      NEXT_DIST_DIR: devDistDir,
       NEXT_DISABLE_WEBPACK_CACHE: "1",
     },
   },

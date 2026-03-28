@@ -52,6 +52,45 @@ COLOR_DARK_TEXT = colors.HexColor("#1B1B2F")
 COLOR_GRAY = colors.HexColor("#6C6F93")
 
 PAGE_WIDTH, PAGE_HEIGHT = A4
+REPORT_FONT_REGULAR = "Helvetica"
+REPORT_FONT_BOLD = "Helvetica-Bold"
+
+
+def _register_report_fonts() -> tuple[str, str]:
+    """Türkçe karakterleri güvenli biçimde gömülü fontlarla üret."""
+    regular_candidates = [
+        Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
+        Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+        Path("/Library/Fonts/Arial Unicode.ttf"),
+    ]
+    bold_candidates = [
+        Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
+        Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+        Path("/Library/Fonts/Arial Unicode.ttf"),
+    ]
+
+    regular_name = REPORT_FONT_REGULAR
+    bold_name = REPORT_FONT_BOLD
+
+    try:
+        registered_fonts = set(pdfmetrics.getRegisteredFontNames())
+        for candidate in regular_candidates:
+            if candidate.exists():
+                regular_name = "SelcukBoltUnicode"
+                if regular_name not in registered_fonts:
+                    pdfmetrics.registerFont(TTFont(regular_name, str(candidate)))
+                break
+
+        for candidate in bold_candidates:
+            if candidate.exists():
+                bold_name = "SelcukBoltUnicodeBold"
+                if bold_name not in registered_fonts:
+                    pdfmetrics.registerFont(TTFont(bold_name, str(candidate)))
+                break
+    except Exception:
+        return REPORT_FONT_REGULAR, REPORT_FONT_BOLD
+
+    return regular_name, bold_name
 
 
 def generate_bolton_report(
@@ -85,8 +124,10 @@ def generate_bolton_report(
     if measurements_df.empty:
         raise ValueError("Ölçüm verisi boş — rapor oluşturulamaz.")
 
+    report_font_regular, report_font_bold = _register_report_fonts()
+
     # ── Stilleri hazırla ──
-    styles = _create_styles()
+    styles = _create_styles(report_font_regular, report_font_bold)
 
     # ── PDF belgesini oluştur ──
     doc = SimpleDocTemplate(
@@ -96,7 +137,7 @@ def generate_bolton_report(
         rightMargin=20 * mm,
         topMargin=15 * mm,
         bottomMargin=15 * mm,
-        title=f"Bolton Analizi — {patient_id}",
+        title=f"Bolton Analizi - {patient_id}",
         author="SelçukBolt",
     )
 
@@ -105,7 +146,7 @@ def generate_bolton_report(
     # ═══════════════════════════════════════════
     # 1. BAŞLIK
     # ═══════════════════════════════════════════
-    story.append(Paragraph("🦷 Bolton Analizi Klinik Raporu", styles["Title"]))
+    story.append(Paragraph("Bolton Analizi Klinik Raporu", styles["Title"]))
     story.append(Spacer(1, 3 * mm))
     story.append(HRFlowable(
         width="100%", thickness=2,
@@ -128,10 +169,10 @@ def generate_bolton_report(
         ("TEXTCOLOR", (2, 0), (2, -1), COLOR_GRAY),
         ("TEXTCOLOR", (1, 0), (1, -1), COLOR_DARK_TEXT),
         ("TEXTCOLOR", (3, 0), (3, -1), COLOR_DARK_TEXT),
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica"),
-        ("FONTNAME", (2, 0), (2, -1), "Helvetica"),
-        ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
-        ("FONTNAME", (3, 0), (3, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (0, -1), report_font_regular),
+        ("FONTNAME", (2, 0), (2, -1), report_font_regular),
+        ("FONTNAME", (1, 0), (1, -1), report_font_bold),
+        ("FONTNAME", (3, 0), (3, -1), report_font_bold),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
         ("TOPPADDING", (0, 0), (-1, -1), 2),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -175,11 +216,11 @@ def generate_bolton_report(
         # Başlık satırı
         ("BACKGROUND", (0, 0), (-1, 0), COLOR_ACCENT),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (-1, 0), report_font_bold),
         ("FONTSIZE", (0, 0), (-1, 0), 9),
         ("ALIGNMENT", (0, 0), (-1, 0), "CENTER"),
         # Veri satırları
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTNAME", (0, 1), (-1, -1), report_font_regular),
         ("FONTSIZE", (0, 1), (-1, -1), 8),
         ("ALIGNMENT", (0, 1), (0, -1), "CENTER"),
         ("ALIGNMENT", (2, 1), (2, -1), "CENTER"),
@@ -261,7 +302,7 @@ def generate_bolton_report(
     ref_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), COLOR_PRIMARY),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (-1, 0), report_font_bold),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
         ("ALIGNMENT", (0, 0), (-1, -1), "CENTER"),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CCD5E0")),
@@ -306,13 +347,20 @@ def generate_bolton_report(
 # YARDIMCI FONKSİYONLAR
 # ──────────────────────────────────────────────────
 
-def _create_styles() -> dict:
+def _create_styles(font_regular: str, font_bold: str) -> dict:
     """Rapor stillerini oluşturur."""
     styles = getSampleStyleSheet()
+
+    styles["Normal"].fontName = font_regular
+    styles["Title"].fontName = font_bold
+    styles["Heading1"].fontName = font_bold
+    styles["Heading2"].fontName = font_bold
+    styles["Heading3"].fontName = font_bold
 
     styles.add(ParagraphStyle(
         name="Heading2Custom",
         parent=styles["Heading2"],
+        fontName=font_bold,
         fontSize=13,
         textColor=COLOR_PRIMARY,
         spaceAfter=4,
@@ -321,6 +369,7 @@ def _create_styles() -> dict:
     styles.add(ParagraphStyle(
         name="Heading3Custom",
         parent=styles["Heading3"],
+        fontName=font_bold,
         fontSize=10,
         textColor=COLOR_ACCENT,
         spaceAfter=2,
@@ -329,6 +378,7 @@ def _create_styles() -> dict:
     styles.add(ParagraphStyle(
         name="Body",
         parent=styles["Normal"],
+        fontName=font_regular,
         fontSize=9,
         textColor=COLOR_DARK_TEXT,
         leading=14,
@@ -337,6 +387,7 @@ def _create_styles() -> dict:
     styles.add(ParagraphStyle(
         name="BodyGray",
         parent=styles["Normal"],
+        fontName=font_regular,
         fontSize=9,
         textColor=COLOR_GRAY,
         leading=14,
@@ -345,6 +396,7 @@ def _create_styles() -> dict:
     styles.add(ParagraphStyle(
         name="Footer",
         parent=styles["Normal"],
+        fontName=font_regular,
         fontSize=7,
         textColor=COLOR_GRAY,
         alignment=TA_CENTER,
@@ -423,17 +475,17 @@ def _build_ratio_card(
     card_table = Table(card_data, colWidths=[42 * mm, 42 * mm, 35 * mm, 30 * mm])
     card_table.setStyle(TableStyle([
         # Başlık satırı
-        ("FONTNAME", (0, 0), (0, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (0, 0), styles["Heading2"].fontName),
         ("FONTSIZE", (0, 0), (0, 0), 11),
         ("TEXTCOLOR", (0, 0), (0, 0), COLOR_PRIMARY),
         ("SPAN", (0, 0), (2, 0)),  # Başlık genişlet
         # Durum etiketi
-        ("FONTNAME", (3, 0), (3, 0), "Helvetica-Bold"),
+        ("FONTNAME", (3, 0), (3, 0), styles["Heading2"].fontName),
         ("FONTSIZE", (3, 0), (3, 0), 9),
         ("TEXTCOLOR", (3, 0), (3, 0), status_color),
         ("ALIGNMENT", (3, 0), (3, 0), "RIGHT"),
         # Veri satırları
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTNAME", (0, 1), (-1, -1), styles["Body"].fontName),
         ("FONTSIZE", (0, 1), (-1, -1), 8),
         ("TEXTCOLOR", (0, 1), (-1, -1), COLOR_DARK_TEXT),
         ("SPAN", (0, 3), (3, 3)),

@@ -1,4 +1,4 @@
-import type { AnalysisMode } from "@/lib/tooth-config";
+import type { AnalysisMode, JawKey } from "@/lib/tooth-config";
 
 export type MeasurementsState = Record<number, string>;
 
@@ -63,6 +63,11 @@ export interface SessionPayload {
   occlusionShiftY?: number;
   occlusionShiftZ?: number;
   activeToothIndex?: number;
+  measurementStage?: "landmarks" | "arch";
+  archModeJaw?: JawKey;
+  archPoints?: Partial<Record<JawKey, LandmarkPoint[]>>;
+  archDraft?: LandmarkPoint | null;
+  archLengths?: Partial<Record<JawKey, number | null>>;
 }
 
 export interface AnalyzePayload {

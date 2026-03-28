@@ -741,6 +741,11 @@ class MeshViewer(QFrame):
         self,
         maxilla_mesh: pv.PolyData,
         mandible_mesh: pv.PolyData,
+        *,
+        offset_x_mm: float = 0.0,
+        offset_y_mm: float = 0.0,
+        offset_z_mm: float = 0.0,
+        gap_mm: float = 1.0,
     ) -> None:
         """Maksilla ve mandibulayı tek sahnede kapanış görünümüyle gösterir."""
         if not self._ensure_plotter():
@@ -750,6 +755,14 @@ class MeshViewer(QFrame):
 
         max_render = maxilla_mesh.copy(deep=True).triangulate()
         mand_render = mandible_mesh.copy(deep=True).triangulate()
+
+        max_render, mand_render = self._align_jaws_no_interpenetration(
+            max_render,
+            mand_render,
+            gap_mm=gap_mm,
+        )
+        if any(abs(value) > 1e-6 for value in (offset_x_mm, offset_y_mm, offset_z_mm)):
+            mand_render.translate([offset_x_mm, offset_y_mm, offset_z_mm], inplace=True)
 
         try:
             max_render.compute_normals(
@@ -824,6 +837,50 @@ class MeshViewer(QFrame):
         self._base_camera_distance = float(np.linalg.norm(np.asarray(camera.GetPosition()) - np.asarray(camera.GetFocalPoint())))
         self._zoom_factor = 1.0
         self._update_zoom_indicator()
+
+    def _align_jaws_no_interpenetration(
+        self,
+        max_mesh: pv.PolyData,
+        mand_mesh: pv.PolyData,
+        gap_mm: float = 1.0,
+    ) -> tuple[pv.PolyData, pv.PolyData]:
+        """
+        Maksilla ve mandibulayı çakışma olmadan konumlandırır.
+
+        Strateji:
+            - Maksillayı orijinal konumunda bırak.
+            - Tarayıcıdan bağımsız: Y ve Z bounding-box genişliklerini
+              karşılaştırarak dikey ekseni otomatik tespit et.
+              iTero / Medit → dikey eksen Z (bounds[4]/[5])
+              3Shape / Carestream → dikey eksen Y (bounds[2]/[3])
+            - Mandibulayı tespit edilen eksende maksillanın altına,
+              en az `gap_mm` boşluk bırakacak şekilde taşır.
+        """
+        # Dikey ekseni otomatik tespit et
+        max_y_span = float(max_mesh.bounds[3]) - float(max_mesh.bounds[2])
+        max_z_span = float(max_mesh.bounds[5]) - float(max_mesh.bounds[4])
+        use_z_axis = max_z_span > max_y_span  # iTero/Medit: Z, 3Shape: Y
+
+        if use_z_axis:
+            max_low   = float(max_mesh.bounds[4])   # z_min
+            mand_high = float(mand_mesh.bounds[5])  # z_max
+            overlap   = mand_high - max_low
+            if overlap > -gap_mm:
+                offset = overlap + gap_mm
+                mand_moved = mand_mesh.copy(deep=True)
+                mand_moved.translate([0.0, 0.0, -offset], inplace=True)
+                return max_mesh, mand_moved
+        else:
+            max_low   = float(max_mesh.bounds[2])   # y_min
+            mand_high = float(mand_mesh.bounds[3])  # y_max
+            overlap   = mand_high - max_low
+            if overlap > -gap_mm:
+                offset = overlap + gap_mm
+                mand_moved = mand_mesh.copy(deep=True)
+                mand_moved.translate([0.0, -offset, 0.0], inplace=True)
+                return max_mesh, mand_moved
+
+        return max_mesh, mand_mesh
 
     def clear(self, preserve_status: bool = False) -> None:
         """Görüntüleyiciyi temizler — tüm mesh ve işaretleyicileri kaldırır."""

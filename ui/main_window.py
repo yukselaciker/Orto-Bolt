@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QApplication, QLineEdit, QTextEdit,
     QDialog, QDialogButtonBox, QFormLayout, QStackedWidget,
     QProgressBar, QTableWidget, QTableWidgetItem, QHeaderView,
-    QInputDialog,
+    QInputDialog, QSlider,
     QAbstractItemView, QToolButton, QMenu, QButtonGroup, QStyle,
 )
 from PySide6.QtCore import Qt, QSize, QThread, Signal, QTimer, QPoint
@@ -145,6 +145,8 @@ class MainWindow(QMainWindow):
         self.window_fullscreen_mode = False
         self.current_view_mode = "maxillary"
         self.active_navigation_tool = "rotate"
+        self.occlusion_offsets_mm = {"x": 0.0, "y": 0.0, "z": 0.0}
+        self.occlusion_gap_mm = 0.2
 
         # Arayüzü oluştur
         self._apply_global_style()
@@ -830,6 +832,10 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(toolbar_card)
 
+        self.occlusion_control_card = self._build_occlusion_control_card()
+        self.occlusion_control_card.hide()
+        layout.addWidget(self.occlusion_control_card)
+
         self.viewer_stack = QStackedWidget()
         self.viewer_stack.addWidget(self.viewer_maxilla)
         self.viewer_stack.addWidget(self.viewer_mandible)
@@ -848,6 +854,153 @@ class MainWindow(QMainWindow):
         self._set_analysis_panel_collapsed(True, adjust_splitter=False)
         QTimer.singleShot(0, self._apply_workspace_splitter_sizes)
         return panel
+
+    def _build_occlusion_control_card(self) -> QWidget:
+        """Kapanış modunda görünen kompakt çene kaydırma kontrol şeridi."""
+        card = QFrame()
+        card.setObjectName("occlusionControlCard")
+        card.setStyleSheet("""
+            QFrame#occlusionControlCard {
+                background-color: #121826;
+                border: 1px solid rgba(255,255,255,0.06);
+                border-radius: 14px;
+            }
+            QLabel {
+                color: #E2E8F0;
+            }
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: rgba(255,255,255,0.1);
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                width: 16px;
+                margin: -5px 0;
+                border-radius: 8px;
+                background: #3B82F6;
+            }
+        """)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.setSpacing(10)
+
+        title = QLabel("KAPANIŞ KONTROLLERİ")
+        title.setStyleSheet("font-size: 12px; font-weight: 800; letter-spacing: 0.7px;")
+        header.addWidget(title)
+
+        self.lbl_occlusion_summary = QLabel("X 0.0 mm • Y 0.0 mm • Z 0.0 mm")
+        self.lbl_occlusion_summary.setStyleSheet("color: #93C5FD; font-size: 11px;")
+        header.addWidget(self.lbl_occlusion_summary, 1, Qt.AlignmentFlag.AlignRight)
+
+        self.btn_reset_occlusion = QPushButton("Sıfırla")
+        self.btn_reset_occlusion.setObjectName("ghostButton")
+        self.btn_reset_occlusion.setFixedHeight(30)
+        self.btn_reset_occlusion.clicked.connect(self._reset_occlusion_offsets)
+        header.addWidget(self.btn_reset_occlusion)
+        layout.addLayout(header)
+
+        self.slider_occlusion_x, self.lbl_occlusion_x = self._create_occlusion_slider_row(
+            layout,
+            "Sağ-Sol (X)",
+            -100,
+            100,
+        )
+        self.slider_occlusion_y, self.lbl_occlusion_y = self._create_occlusion_slider_row(
+            layout,
+            "Yukarı-Aşağı (Y)",
+            -60,
+            60,
+        )
+        self.slider_occlusion_z, self.lbl_occlusion_z = self._create_occlusion_slider_row(
+            layout,
+            "Ön-Arka (Z)",
+            -150,
+            150,
+        )
+
+        self.slider_occlusion_x.valueChanged.connect(lambda value: self._on_occlusion_slider_changed("x", value))
+        self.slider_occlusion_y.valueChanged.connect(lambda value: self._on_occlusion_slider_changed("y", value))
+        self.slider_occlusion_z.valueChanged.connect(lambda value: self._on_occlusion_slider_changed("z", value))
+        self._sync_occlusion_controls()
+        return card
+
+    def _create_occlusion_slider_row(
+        self,
+        parent_layout: QVBoxLayout,
+        title: str,
+        minimum: int,
+        maximum: int,
+    ) -> tuple[QSlider, QLabel]:
+        """Başlık + değer etiketi + slider üçlüsünden oluşan satır üretir."""
+        row = QFrame()
+        row_layout = QVBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(4)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(8)
+
+        title_label = QLabel(title)
+        title_label.setStyleSheet("font-size: 11px; color: #CBD5E1; font-weight: 600;")
+        header.addWidget(title_label)
+
+        value_label = QLabel("0.0 mm")
+        value_label.setStyleSheet("font-size: 11px; color: #F8FAFC; font-family: 'Menlo';")
+        header.addWidget(value_label, 1, Qt.AlignmentFlag.AlignRight)
+        row_layout.addLayout(header)
+
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(minimum, maximum)
+        slider.setSingleStep(1)
+        slider.setPageStep(5)
+        slider.setValue(0)
+        row_layout.addWidget(slider)
+
+        parent_layout.addWidget(row)
+        return slider, value_label
+
+    def _sync_occlusion_controls(self) -> None:
+        """Kapanış slider'larını ve özet etiketlerini mevcut state ile eşler."""
+        for axis, slider in (
+            ("x", self.slider_occlusion_x),
+            ("y", self.slider_occlusion_y),
+            ("z", self.slider_occlusion_z),
+        ):
+            target = int(round(self.occlusion_offsets_mm[axis] * 10.0))
+            was_blocked = slider.blockSignals(True)
+            slider.setValue(target)
+            slider.blockSignals(was_blocked)
+
+        self.lbl_occlusion_x.setText(f"{self.occlusion_offsets_mm['x']:+.1f} mm")
+        self.lbl_occlusion_y.setText(f"{self.occlusion_offsets_mm['y']:+.1f} mm")
+        self.lbl_occlusion_z.setText(f"{self.occlusion_offsets_mm['z']:+.1f} mm")
+        self.lbl_occlusion_summary.setText(
+            f"X {self.occlusion_offsets_mm['x']:+.1f} mm • "
+            f"Y {self.occlusion_offsets_mm['y']:+.1f} mm • "
+            f"Z {self.occlusion_offsets_mm['z']:+.1f} mm"
+        )
+
+    def _on_occlusion_slider_changed(self, axis: str, raw_value: int) -> None:
+        """Kapanış kontrolünü mm cinsine çevirip görünümü anında yeniler."""
+        self.occlusion_offsets_mm[axis] = raw_value / 10.0
+        self._sync_occlusion_controls()
+        if self.current_view_mode == "occlusion" and self.maxilla_mesh is not None and self.mandible_mesh is not None:
+            self._refresh_occlusion_view()
+        self._autosave_session()
+
+    def _reset_occlusion_offsets(self) -> None:
+        """Kapanış modundaki manuel kaydırmaları sıfırlar."""
+        self.occlusion_offsets_mm = {"x": 0.0, "y": 0.0, "z": 0.0}
+        self._sync_occlusion_controls()
+        if self.current_view_mode == "occlusion" and self.maxilla_mesh is not None and self.mandible_mesh is not None:
+            self._refresh_occlusion_view()
+        self.statusBar().showMessage("Kapanış kaydırmaları sıfırlandı.", 2500)
+        self._autosave_session()
 
     def _build_right_panel(self) -> QWidget:
         panel = QFrame()
@@ -1291,6 +1444,9 @@ class MainWindow(QMainWindow):
             "arch_points": [self._serialize_point(point) for point in self.arch_points],
             "view_mode": self.current_view_mode,
             "active_navigation_tool": self.active_navigation_tool,
+            "occlusion_offsets_mm": {
+                axis: float(value) for axis, value in self.occlusion_offsets_mm.items()
+            },
         }
 
     def _autosave_session(self) -> None:
@@ -1897,6 +2053,13 @@ class MainWindow(QMainWindow):
             ]
             self.current_view_mode = payload.get("view_mode") or "maxillary"
             self.active_navigation_tool = payload.get("active_navigation_tool") or "rotate"
+            saved_occlusion = payload.get("occlusion_offsets_mm") or {}
+            self.occlusion_offsets_mm = {
+                "x": float(saved_occlusion.get("x", 0.0) or 0.0),
+                "y": float(saved_occlusion.get("y", 0.0) or 0.0),
+                "z": float(saved_occlusion.get("z", 0.0) or 0.0),
+            }
+            self._sync_occlusion_controls()
 
             self._sync_dashboard_from_measurements()
             self._refresh_toolbar_availability()
@@ -2054,6 +2217,7 @@ class MainWindow(QMainWindow):
             self.viewer_stack.setCurrentWidget(self.viewer_occlusion)
             self.current_view_mode = "occlusion"
             self.lbl_active_mode.setText("KAPANIŞ • Oklüzyon Görünümü")
+            self.lbl_active_step.setText("Çeneleri birlikte inceleyin. Alt çeneyi X/Y/Z kaydırma barlarıyla konumlandırabilirsiniz.")
             self.statusBar().showMessage("Kapanış görünümü aktif.", 2500)
         elif mode == "mandibular":
             self.viewer_stack.setCurrentWidget(self.viewer_mandible)
@@ -2070,6 +2234,8 @@ class MainWindow(QMainWindow):
             self.action_view_maxilla.setChecked(self.current_view_mode == "maxillary")
             self.action_view_mandible.setChecked(self.current_view_mode == "mandibular")
             self.action_view_occlusion.setChecked(self.current_view_mode == "occlusion")
+        if hasattr(self, "occlusion_control_card"):
+            self.occlusion_control_card.setVisible(self.current_view_mode == "occlusion")
 
         if self.model_focus_mode:
             self._apply_model_focus_layout(self.current_view_mode)
@@ -2085,9 +2251,13 @@ class MainWindow(QMainWindow):
         self.viewer_occlusion.display_occlusion_meshes(
             self.maxilla_mesh,
             self.mandible_mesh,
+            offset_x_mm=self.occlusion_offsets_mm["x"],
+            offset_y_mm=self.occlusion_offsets_mm["y"],
+            offset_z_mm=self.occlusion_offsets_mm["z"],
+            gap_mm=self.occlusion_gap_mm,
         )
         self.viewer_occlusion.set_overlay_hint(
-            "Kapanış görünümü aktif. İki çenenin ilişkisini birlikte inceleyebilirsiniz."
+            "Kapanış görünümü aktif. Üstteki kaydırma barlarıyla mandibulayı X/Y/Z eksenlerinde ayarlayabilirsiniz."
         )
 
     def _set_navigation_tool(self, tool_name: str) -> None:
